@@ -1,0 +1,28 @@
+version: '3'
+services:
+
+  # ABAC and Auth containers
+
+  abac-zuul-proxy:
+    image: registry.gitlab.com/asclepios-project/abac-authorization/abac-zuul-proxy:3.0.2
+    container_name: abac-zuul-proxy
+    restart: on-failure
+    depends_on:
+      - pdp-server
+      - keycloak
+    environment:
+      SSE_URL: http://sse:8080/
+      TA_URL: http://ta:8000/
+      PDP_ENDPOINTS: https://pdp-server:7071/checkJsonAccessRequest
+      PDP_TRUSTSTORE_FILE: /abac-proxy/certs/common-truststore.p12
+      PDP_TRUSTSTORE_TYPE: PKCS12
+      PDP_LOAD_BALANCE_METHOD: ORDER
+      PDP_RETRY_COUNT: 1
+      KEYCLOAK_ENABLED: 'true'
+    expose:
+      - 80
+    ports:
+      - "80:80"
+    volumes:
+      - /var/lib/abac:/abac-proxy/config/
+
