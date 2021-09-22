@@ -8,35 +8,62 @@ logging.basicConfig(filename="std.log",format='%(asctime)s %(message)s',filemode
 logger=logging.getLogger()
 logger.setLevel(logging.INFO)
 
-def translate(file):
-    type = check_type(file)
-    if type == 'manifest':
-        translate_manifest(file)
-    elif type == 'compose':
-        container_name = validate_compose(file)
-        convert_doc_to_kube(file,container_name)
-        file_name = "{}.yaml".format(container_name)
-        translate_manifest(file_name)
+def translate(file, stream = False):
+    if not stream:
+        with open(file, "r") as in_file:
+            data = in_file.read()
+    else:
+        data = file
 
-def check_type(file):
-    """Check whether the given file is a Docker Compose or K8s Manifest
+    type = check_type(data)
+    if type == 'manifest':
+        translate_manifest(data)
+    elif type == 'compose':
+        container_name = validate_compose(data)
+        convert_doc_to_kube(data,container_name)
+        file_name = "{}.yaml".format(container_name)
+        with open(file_name, "r") as f:
+            data_new = f.read()
+        translate_manifest(data_new)
+        cmd = "rm {}*".format(container_name)
+        os.system(cmd)
+
+def check_type(data):
+    """Check whether the given string data is a Docker Compose or K8s Manifest
 
     Args:
-        file (string): Path to a docker compose or k8s manifest
+        data (string): string containing a docker compose or k8s manifest
 
     Returns:
         string: compose or manifest
-    """ 
-    with open(file, "r") as in_file:
-        dicts = yaml.safe_load_all(in_file)
-        dict = list(dicts)[0]
-        if 'kind' in dict:
-            type = "manifest"
-        elif 'services' in dict:
-            type = "compose"    
+    """     
+    dicts = yaml.safe_load_all(data)
+    dict = list(dicts)[0]
+    if 'kind' in dict:
+        type = "manifest"
+    elif 'services' in dict:
+        type = "compose"    
     return type
 
-def validate_compose(file):
+def validate_compose(data):
+    """Check whether the given file Docker Compose contains more than one containers
+
+    Args:
+        data (string): String containing Docker Compose contents
+
+    Returns:
+        string: name of the container
+    """
+   
+    dicts = yaml.safe_load(data)
+    dict = dicts['services']
+    if len(dict) > 1:
+        logger.info("Docker compose file can't have more than one containers. Exiting...")
+        sys.exit("Docker compose file has more than one container")
+    name = next(iter(dict))
+    return name
+
+def convert_doc_to_kube(data,container_name):
     """Check whether the given file Docker Compose contains more than one containers
 
     Args:
@@ -45,44 +72,29 @@ def validate_compose(file):
     Returns:
         string: name of the container
     """
-    with open(file, "r") as in_file:
-        dicts = yaml.safe_load(in_file)
-        dict = dicts['services']
-        if len(dict) > 1:
-            logger.info("Docker compose file can't have more than one containers. Exiting...")
-            sys.exit("Docker compose file has more than one container")
-        name = next(iter(dict))
-        return name
-
-def convert_doc_to_kube(file,container_name):
-    """Check whether the given file Docker Compose contains more than one containers
-
-    Args:
-        file (string): Path to a Docker Compose file
-
-    Returns:
-        string: name of the container
-    """
-    cmd = "kompose convert -f {} --volumes hostPath".format(file)
+    with open('compose.yaml', "w") as out_file:
+        out_file.write(data)
+    cmd = "kompose convert -f compose.yaml --volumes hostPath"
     os.system(cmd)
     cmd = "count=0;for file in `ls {}-*`; do if [ $count -eq 0 ]; then cat $file >{}.yaml; count=1; else echo '---'>>{}.yaml; cat $file >>{}.yaml; fi; done".format(container_name,container_name,container_name,container_name)
     os.system(cmd)
 
-def translate_manifest(file):
+    os.remove('compose.yaml')
+
+def translate_manifest(data):
     """Translates K8s Manifest(s) to a MiCADO ADT
 
     Args:
         file (string): Path to Kubernetes manifest
     """
-    in_path = Path(file)
-    adt = _get_default_adt(in_path.name)
+    adt = _get_default_adt()
     node_templates = adt["topology_template"]["node_templates"]
-    logger.info("Translating the file {}".format(file))
-    with open(file, "r") as in_file:
-        manifests = yaml.safe_load_all(in_file)
-        _transform(manifests, in_path.stem, node_templates)
+    logger.info("Translating the manifest")
+    
+    manifests = yaml.safe_load_all(data)
+    _transform(manifests, 'micado', node_templates)
 
-    out_path = Path(f"{os.getcwd()}/adt-{in_path.name}")
+    out_path = Path(f"{os.getcwd()}/adt-micado.yaml")
     with open(out_path, "w") as out_file:
         yaml.round_trip_dump(adt, out_file)
 
@@ -92,7 +104,7 @@ def _transform(manifests, filename, node_templates):
 
     Args:
         manifests (iter): Iterable of k8s manifests
-        filename (string): Name of the input file
+        filename (string): Name of the file
         node_templates (dict): `node_templates` key of the ADT
     """
     wln = 0
@@ -127,7 +139,7 @@ def _get_name(manifest):
         return None,0
 
 
-def _get_default_adt(filename):
+def _get_default_adt():
     """Returns the boilerplate for a MiCADO ADT
 
     Args:
@@ -159,4 +171,5 @@ def _to_node(manifest):
         "type": "tosca.nodes.MiCADO.Kubernetes",
         "interfaces": {"Kubernetes": {"create": {"inputs": manifest}}},
     }
+
 
