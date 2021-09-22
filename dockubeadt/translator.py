@@ -1,5 +1,4 @@
-import os,sys
-from pathlib import Path
+import os
 
 import ruamel.yaml as yaml
 import logging
@@ -17,16 +16,18 @@ def translate(file, stream = False):
 
     type = check_type(data)
     if type == 'manifest':
-        translate_manifest(data)
+        mdt = translate_manifest(data)
     elif type == 'compose':
         container_name = validate_compose(data)
         convert_doc_to_kube(data,container_name)
         file_name = "{}.yaml".format(container_name)
         with open(file_name, "r") as f:
             data_new = f.read()
-        translate_manifest(data_new)
+        mdt = translate_manifest(data_new)
         cmd = "rm {}*".format(container_name)
         os.system(cmd)
+
+    return mdt
 
 def check_type(data):
     """Check whether the given string data is a Docker Compose or K8s Manifest
@@ -53,13 +54,12 @@ def validate_compose(data):
 
     Returns:
         string: name of the container
-    """
-   
+    """   
     dicts = yaml.safe_load(data)
     dict = dicts['services']
     if len(dict) > 1:
         logger.info("Docker compose file can't have more than one containers. Exiting...")
-        sys.exit("Docker compose file has more than one container")
+        raise ValueError("Docker compose file has more than one container")
     name = next(iter(dict))
     return name
 
@@ -86,6 +86,8 @@ def translate_manifest(data):
 
     Args:
         file (string): Path to Kubernetes manifest
+    Returns:
+        adt: ADT in dictionary format
     """
     adt = _get_default_adt()
     node_templates = adt["topology_template"]["node_templates"]
@@ -94,10 +96,7 @@ def translate_manifest(data):
     manifests = yaml.safe_load_all(data)
     _transform(manifests, 'micado', node_templates)
 
-    out_path = Path(f"{os.getcwd()}/adt-micado.yaml")
-    with open(out_path, "w") as out_file:
-        yaml.round_trip_dump(adt, out_file)
-
+    return adt
 
 def _transform(manifests, filename, node_templates):
     """Transforms a single manifest into a node template
@@ -114,7 +113,7 @@ def _transform(manifests, filename, node_templates):
             wln = wln + 1
         if wln > 1:
             logger.info("Manifest file can't have more than one workloads. Exiting ...")
-            sys.exit("Manifest file has more than one workload")
+            raise ValueError("Manifest file has more than one workload")
         node_name = name or f"{filename}-{ix}"
         node_templates[node_name] = _to_node(manifest)
 
@@ -171,5 +170,3 @@ def _to_node(manifest):
         "type": "tosca.nodes.MiCADO.Kubernetes",
         "interfaces": {"Kubernetes": {"create": {"inputs": manifest}}},
     }
-
-

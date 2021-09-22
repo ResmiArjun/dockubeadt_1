@@ -1,7 +1,9 @@
 import click
-import sys
+import sys,os
 
 from .translator import translate
+import ruamel.yaml as yaml
+from pathlib import Path
 from ruamel.yaml.scanner import ScannerError
 
 
@@ -12,7 +14,10 @@ def main(file):
 
     FILE is the path to a single/multi compose files or K8s manifests (YAML)"""
     try:
-        translate(file)
+        mdt = translate(file)
+        out_path = Path(f"{os.getcwd()}/adt-micado.yaml")
+        with open(out_path, "w") as out_file:
+            yaml.round_trip_dump(mdt, out_file)
     except ScannerError:
         print("[Errno 1] Not a valid YAML file")
         sys.exit(1)
